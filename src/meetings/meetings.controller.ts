@@ -1,8 +1,12 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
 import { MeetingsService } from './meetings.service';
 import { CreateMeetingDto } from './dto/create-meeting.dto';
 import { UpdateMeetingDto } from './dto/update-meeting.dto';
+import { ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('meetings')
 export class MeetingsController {
   constructor(private readonly meetingsService: MeetingsService) {}
@@ -19,16 +23,16 @@ export class MeetingsController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.meetingsService.findOne(+id);
+    return this.meetingsService.findOne(id);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateMeetingDto: UpdateMeetingDto) {
-    return this.meetingsService.update(+id, updateMeetingDto);
+    return this.meetingsService.update(id, updateMeetingDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.meetingsService.remove(+id);
+    return this.meetingsService.remove(id);
   }
 }

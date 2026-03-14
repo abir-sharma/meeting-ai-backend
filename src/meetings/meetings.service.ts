@@ -1,26 +1,103 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
+
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+
 import { CreateMeetingDto } from './dto/create-meeting.dto';
 import { UpdateMeetingDto } from './dto/update-meeting.dto';
 
+import { Meeting, MeetingDocument } from './entities/meeting.entity';
+
 @Injectable()
 export class MeetingsService {
-  create(createMeetingDto: CreateMeetingDto) {
-    return 'This action adds a new meeting';
+
+  constructor(
+    @InjectModel(Meeting.name)
+    private readonly meetingModel: Model<MeetingDocument>,
+  ) {}
+
+  async create(createMeetingDto: CreateMeetingDto) {
+    try {
+
+      const meeting = new this.meetingModel(createMeetingDto);
+
+      return await meeting.save();
+
+    } catch (error: any) {
+
+      if (error.code === 11000) {
+        throw new ConflictException('Meeting already exists');
+      }
+
+      throw error;
+    }
   }
 
-  findAll() {
-    return `This action returns all meetings`;
+  async findAll() {
+
+    return this.meetingModel
+      .find()
+      .populate('deviceId', 'deviceId name')
+      .populate('createdBy', 'name email')
+      .sort({ createdAt: -1 });
+
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} meeting`;
+  async findOne(id: string) {
+
+    const meeting = await this.meetingModel
+      .findById(id)
+      .populate('deviceId', 'deviceId name')
+      .populate('createdBy', 'name email');
+
+    if (!meeting) {
+      throw new NotFoundException('Meeting not found');
+    }
+
+    return meeting;
   }
 
-  update(id: number, updateMeetingDto: UpdateMeetingDto) {
-    return `This action updates a #${id} meeting`;
+  async update(id: string, updateMeetingDto: UpdateMeetingDto) {
+
+    try {
+
+      const meeting = await this.meetingModel
+        .findByIdAndUpdate(id, updateMeetingDto, {
+          new: true,
+          runValidators: true,
+        });
+
+      if (!meeting) {
+        throw new NotFoundException('Meeting not found');
+      }
+
+      return meeting;
+
+    } catch (error: any) {
+
+      if (error.code === 11000) {
+        throw new ConflictException('Duplicate meeting data');
+      }
+
+      throw error;
+    }
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} meeting`;
+  async remove(id: string) {
+
+    const meeting = await this.meetingModel.findByIdAndDelete(id);
+
+    if (!meeting) {
+      throw new NotFoundException('Meeting not found');
+    }
+
+    return {
+      message: 'Meeting deleted successfully',
+    };
   }
+
 }

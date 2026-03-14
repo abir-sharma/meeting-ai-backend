@@ -1,26 +1,98 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
+
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
+import { User, UserDocument } from './entities/user.entity';
+
 @Injectable()
 export class UsersService {
-  create(createUserDto: CreateUserDto) {
-    return 'This action adds a new user';
+
+  constructor(
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
+  ) {}
+
+  async findByEmail(email: string) {
+    return this.userModel
+      .findOne({ email })
+      .select('+password');
   }
 
-  findAll() {
-    return `This action returns all users`;
+  async create(createUserDto: CreateUserDto) {
+    try {
+      const user = new this.userModel(createUserDto);
+      return await user.save();
+
+    } catch (error: any) {
+
+      if (error.code === 11000) {
+        throw new ConflictException('Email already exists');
+      }
+
+      throw error;
+    }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} user`;
+  async findAll() {
+    return this.userModel
+      .find()
+      .select('-password');
   }
 
-  update(id: number, updateUserDto: UpdateUserDto) {
-    return `This action updates a #${id} user`;
+  async findOne(id: string) {
+    const user = await this.userModel
+      .findById(id)
+      .select('-password');
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return user;
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} user`;
+  async update(id: string, updateUserDto: UpdateUserDto) {
+
+    try {
+
+      const user = await this.userModel
+        .findByIdAndUpdate(id, updateUserDto, {
+          new: true,
+        })
+        .select('-password');
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      return user;
+
+    } catch (error: any) {
+
+      if (error.code === 11000) {
+        throw new ConflictException('Email already exists');
+      }
+
+      throw error;
+    }
+  }
+
+  async remove(id: string) {
+
+    const user = await this.userModel.findByIdAndDelete(id);
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    return { message: 'User deleted successfully' };
   }
 }
