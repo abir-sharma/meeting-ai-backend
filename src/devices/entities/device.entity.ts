@@ -11,7 +11,6 @@ export class Device {
     unique: true,
   })
   deviceId: string;
-
   @Prop({
     required: true,
   })

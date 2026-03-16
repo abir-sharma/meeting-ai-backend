@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-export class CreateVoiceProfileDto {
+export class RegisterVoiceDto {
 
   @ApiProperty({
     example: "Abir Sharma",
@@ -10,14 +10,8 @@ export class CreateVoiceProfileDto {
 
   @ApiProperty({
     example: "64f8a3d2c9e77f4a2a1b1234",
-    description: "User ID associated with this voice"
+    description: "User ID"
   })
   userId: string;
-
-  @ApiProperty({
-    example: [0.12,0.34,0.56,0.78],
-    description: "Voice embedding vector"
-  })
-  voiceEmbedding: number[];
 
 }

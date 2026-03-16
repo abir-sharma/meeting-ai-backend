@@ -1,26 +1,68 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+
+import { VoiceProfile, VoiceProfileDocument } from './entities/voice-profile.entity';
 import { CreateVoiceProfileDto } from './dto/create-voice-profile.dto';
-import { UpdateVoiceProfileDto } from './dto/update-voice-profile.dto';
 
 @Injectable()
 export class VoiceProfilesService {
-  create(createVoiceProfileDto: CreateVoiceProfileDto) {
-    return 'This action adds a new voiceProfile';
+
+  constructor(
+    @InjectModel(VoiceProfile.name)
+    private readonly voiceProfileModel: Model<VoiceProfileDocument>,
+  ) {}
+
+  async create(createVoiceProfileDto: CreateVoiceProfileDto) {
+
+    try {
+
+      const profile = new this.voiceProfileModel(createVoiceProfileDto);
+
+      return await profile.save();
+
+    } catch (error: any) {
+
+      if (error.code === 11000) {
+        throw new ConflictException("Voice profile already exists");
+      }
+
+      throw new InternalServerErrorException(error.message);
+    }
   }
 
-  findAll() {
-    return `This action returns all voiceProfiles`;
+  async findAll() {
+    return this.voiceProfileModel.find().sort({ createdAt: -1 });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} voiceProfile`;
+  async findOne(id: string) {
+
+    const profile = await this.voiceProfileModel.findById(id);
+
+    if (!profile) {
+      throw new NotFoundException("Voice profile not found");
+    }
+
+    return profile;
   }
 
-  update(id: number, updateVoiceProfileDto: UpdateVoiceProfileDto) {
-    return `This action updates a #${id} voiceProfile`;
+  async remove(id: string) {
+
+    const profile = await this.voiceProfileModel.findByIdAndDelete(id);
+
+    if (!profile) {
+      throw new NotFoundException("Voice profile not found");
+    }
+
+    return {
+      message: "Voice profile deleted successfully",
+    };
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} voiceProfile`;
-  }
 }
