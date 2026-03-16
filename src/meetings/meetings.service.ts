@@ -18,7 +18,7 @@ export class MeetingsService {
   constructor(
     @InjectModel(Meeting.name)
     private readonly meetingModel: Model<MeetingDocument>,
-  ) {}
+  ) { }
 
   async create(createMeetingDto: CreateMeetingDto) {
     try {
@@ -98,6 +98,12 @@ export class MeetingsService {
     return {
       message: 'Meeting deleted successfully',
     };
+  }
+
+  async processAudio(meetingId: string, audio: any) {
+
+    console.log("Processing audio for meeting:", meetingId)
+
   }
 
 }

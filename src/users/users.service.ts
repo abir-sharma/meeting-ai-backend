@@ -18,12 +18,28 @@ export class UsersService {
   constructor(
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
-  ) {}
+  ) { }
 
   async findByEmail(email: string) {
     return this.userModel
       .findOne({ email })
-      .select('+password');
+      .select('+password')
+      .select("+resetPasswordOtp +resetPasswordOtpExpires");
+  }
+
+  async findByMobile(mobile: string) {
+    return this.userModel.findOne({ mobile }).select("+password");
+  }
+
+  // users.service.ts  — only the two relevant methods shown
+  // async findByEmail(email: string) {
+  //   return this.userModel.findOne({ email }).exec()
+  // }
+
+
+  // ✅ New — explicitly re-selects the hidden password field
+  async findByEmailWithPassword(email: string) {
+    return this.userModel.findOne({ email }).select('+password').exec()
   }
 
   async create(createUserDto: CreateUserDto) {
@@ -51,7 +67,6 @@ export class UsersService {
     const user = await this.userModel
       .findById(id)
       .select('-password');
-
     if (!user) {
       throw new NotFoundException('User not found');
     }

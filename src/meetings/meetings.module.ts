@@ -3,6 +3,7 @@ import { MeetingsService } from './meetings.service';
 import { MeetingsController } from './meetings.controller';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Meeting, MeetingSchema } from './entities/meeting.entity';
+import { MeetingGateway } from './meeting.gateway';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { Meeting, MeetingSchema } from './entities/meeting.entity';
     ])
   ],
   controllers: [MeetingsController],
-  providers: [MeetingsService],
+  providers: [MeetingsService,MeetingGateway],
   exports: [MeetingsService]
 })
 export class MeetingsModule {}
