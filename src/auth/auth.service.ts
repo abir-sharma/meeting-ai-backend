@@ -1,304 +1,796 @@
-import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { SignupDto } from './dto/signup.dto';
-import { UsersService } from 'src/users/users.service';
+import { BadRequestException, ConflictException, HttpException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import axios from 'axios';
-import { AxiosError } from 'axios';
-import { SendOtpDto } from './dto/send-otp.dto';
 import { PwAuthService } from './pw-auth.service';
-import { LoginEmailDto } from './dto/login.dto';
-import { VerifyOtpDto } from './dto/verify.dto';
-
+import { MobileSignupDto } from './dto/signup-mobile.dto';
+import { User } from 'src/users/entities/user.entity';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { AuthIdentity } from 'src/auth/entities/auth_identities.entity';
+import { MobileLoginDto } from './dto/login-mobile.dto';
+import { EmailSignupDto } from './dto/signup-email.dto';
+import { EmailLoginDto } from './dto/login-email.dto';
+import { CompleteProfileDto } from './dto/complete-mobile-profile.dto';
+import { generateRandomPassword, splitName } from 'src/common/utils';
+import { MailService } from './mail-smtp.service';
+import { EmailOtp } from './entities/email-otp.schema';
+import { Meeting } from 'src/meetings/entities/meeting.entity';
+import { Device } from 'src/devices/entities/device.entity';
+import { VoiceProfile } from 'src/voice-profiles/entities/voice-profile.entity';
+import * as crypto from "crypto"
+import { SetPasswordDto } from './dto/set-email-password.dto';
 
 @Injectable()
 export class AuthService {
 
   constructor(
-    private usersService: UsersService,
-    private pwAuthService: PwAuthService,
-    private jwtService: JwtService
+    private mailService: MailService,
+    private jwtService: JwtService,
+    private pwService: PwAuthService,
+    @InjectConnection() private readonly connection: Connection,
+
+    @InjectModel('EmailOtp') private readonly emailOtpModel: Model<EmailOtp>,
+    @InjectModel('User') private readonly userModel: Model<User>,
+    @InjectModel('AuthIdentity') private readonly authIdentityModel: Model<AuthIdentity>,
+    @InjectModel('Meeting') private readonly meetingModel: Model<Meeting>,
+    @InjectModel('Device') private readonly deviceModel: Model<Device>,
+    @InjectModel('VoiceProfile') private readonly voiceProfileModel: Model<VoiceProfile>,
+
   ) { }
 
+  async signupWithMobile(dto: MobileSignupDto) {
+    const { mobile, name } = dto;
 
-  async signup(dto: SignupDto) {
+    const { firstName, lastName } = splitName(name);
 
-    const existing = await this.usersService.findByEmail(dto.email)
+    try {
+      // 1️⃣ Check in DB
+      const existingIdentity = await this.authIdentityModel.findOne({
+        type: 'mobile',
+        value: mobile,
+      });
 
-    if (existing) {
-      throw new ConflictException("Email already exists")
-    }
-
-    const userData: any = {
-      email: dto.email,
-      name: dto.name
-    }
-
-    if (dto.mobile) {
-
-      const existingMobile = await this.usersService.findByMobile(dto.mobile)
-
-      if (existingMobile) {
-        throw new ConflictException("Mobile already registered")
+      if (existingIdentity) {
+        throw new ConflictException('User already exists, please login');
       }
 
       try {
+        // 2️⃣ Try registering in OTP system
+        await this.pwService.registerMobile(
+          mobile,
+          firstName,
+          lastName
+        );
 
-        // try registering in PW
-        await this.pwAuthService.registerMobile(
-          dto.mobile,
-          dto.name,
-          dto.name
-        )
+        // ✅ CASE 3: New user → OTP sent → DO NOT create user yet
+        return {
+          message: 'OTP sent for signup',
+        };
 
-      } catch (error: any) {
+      } catch (err: any) {
 
-        const message =
-          error?.response?.data?.error?.message ||
-          error?.message
+        // ✅ CASE 2: User already exists in OTP system
+        if (err?.message?.includes('User Already Exist')) {
 
-        // ✅ If user already exists in PW, ignore error
-        if (!message?.toLowerCase().includes("exist")) {
-          throw error
+          // 👉 Create user immediately in DB
+          const user = await this.userModel.create({
+            name,
+            isProfileComplete: false,
+          });
+
+          await this.authIdentityModel.create({
+            userId: user._id.toString(),
+            type: 'mobile',
+            value: mobile,
+          });
+
+          return {
+            message: 'User already exists, please login',
+          };
         }
 
-        // else continue (sync DB with PW)
+        throw err; // unknown error
       }
 
-      userData.mobile = dto.mobile
-    }
+    } catch (error) {
 
-    userData.password = await bcrypt.hash(dto.password, 10)
+      // 🔥 Handle duplicate race condition
+      if (error.code === 11000) {
+        throw new ConflictException('Mobile already exists');
+      }
 
-    const user = await this.usersService.create(userData)
+      if (error instanceof ConflictException) {
+        throw error;
+      }
 
-    return {
-      message: "User created successfully",
-      userId: user._id
-    }
-  }
+      console.error('SIGNUP MOBILE ERROR 👉', error);
 
-  async loginEmail(dto: LoginEmailDto) {
-
-    const user = await this.usersService.findByEmail(dto.email)
-
-    if (!user || !user.password) {
-      throw new UnauthorizedException("Invalid credentials")
-    }
-
-    const match = await bcrypt.compare(dto.password, user.password)
-
-    if (!match) {
-      throw new UnauthorizedException("Invalid credentials")
-    }
-
-    const payload = {
-      sub: user._id,
-      email: user.email
-    }
-
-    const token = await this.jwtService.signAsync(payload)
-
-    return {
-      access_token: token
+      throw new InternalServerErrorException('Something went wrong');
     }
   }
 
-  async sendOtp(mobile: string) {
-    // 1️⃣ Check user in DB
-    const user = await this.usersService.findByMobile(mobile);
+  async loginWithMobile(dto: MobileLoginDto) {
+    const { mobile } = dto;
 
-    if (!user) {
-      throw new NotFoundException("User does not exist");
+    const identity = await this.authIdentityModel.findOne({
+      type: 'mobile',
+      value: mobile,
+    });
+
+    if (!identity) {
+      throw new BadRequestException('User not found, please signup first');
     }
-    const response = await this.pwAuthService.sendOtp(mobile)
-    return {
-      message: "OTP sent successfully",
-      data: response
+
+    const user = await this.userModel.findById(identity.userId);
+
+    // ✅ Send OTP (use existing name if needed)
+    await this.pwService.sendOtp(mobile);
+
+    return { message: 'OTP sent for login' };
+  }
+
+  async verifyOtp(mobile: string, otp: string) {
+    try {
+      // 1️⃣ Verify OTP via provider
+      await this.pwService.verifyOtp(mobile, otp);
+
+      // 2️⃣ Check identity
+      let identity = await this.authIdentityModel.findOne({
+        type: 'mobile',
+        value: mobile,
+      });
+
+      let user;
+
+      // LOGIN
+      if (identity) {
+        user = await this.userModel.findById(identity.userId);
+
+        if (!user) {
+          throw new InternalServerErrorException('User data corrupted');
+        }
+      }
+
+      // SIGNUP
+      else {
+        user = await this.userModel.create({
+          isProfileComplete: false,
+        });
+
+        identity = await this.authIdentityModel.create({
+          userId: user._id.toString(),
+          type: 'mobile',
+          value: mobile,
+        });
+      }
+
+      // JWT
+      const payload = {
+        sub: user._id.toString(),
+        mobile,
+      };
+
+      const accessToken = await this.jwtService.signAsync(payload);
+
+      return {
+        user: {
+          id: user._id,
+          name: user.name,
+          isProfileComplete: user.isProfileComplete,
+        },
+        accessToken,
+      };
+
+    } catch (error) {
+
+      // ✅ 🔥 MOST IMPORTANT LINE
+      if (error instanceof HttpException) {
+        throw error; // 👈 preserve original error (400, 401, etc.)
+      }
+
+      // Mongo duplicate
+      if (error.code === 11000) {
+        throw new ConflictException('Mobile already exists');
+      }
+
+      console.error('VERIFY OTP ERROR 👉', error);
+
+      throw new InternalServerErrorException('Something went wrong');
     }
   }
 
-  async verifyOtp(dto: VerifyOtpDto) {
 
-    const otpRes = await this.pwAuthService.verifyOtp(dto.mobile, dto.otp)
 
-    let user = await this.usersService.findByMobile(dto.mobile)
 
-    // user not in our DB but exists in PW
-    if (!user) {
+  async signupWithEmail(dto: EmailSignupDto) {
+    try {
+      const { email, password } = dto;
 
-      user = await this.usersService.create({
-        name: "Mobile User",
-        mobile: dto.mobile,
-        email: `${dto.mobile}@mobile.local`
-      })
-    }
+      // 1️⃣ Check if already exists
+      const existing = await this.authIdentityModel.findOne({
+        type: 'email',
+        value: email,
+      });
 
-    const payload = {
-      sub: user._id,
-      mobile: user.mobile
-    }
+      if (existing) {
+        throw new ConflictException('Email already exists, please login');
+      }
 
-    const token = await this.jwtService.signAsync(payload)
+      // 2️⃣ Generate OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    return {
-      access_token: token,
-      pwToken: otpRes.access_token
+      // 3️⃣ Hash password (store temporarily)
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // 4️⃣ Store OTP + temp data (IMPORTANT)
+      await this.emailOtpModel.findOneAndUpdate(
+        { email }, // find existing OTP for this email
+        {
+          otp,
+          password: hashedPassword,
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        },
+        {
+          upsert: true, // create if not exists
+          new: true,
+        }
+      );
+
+      // 5️⃣ Send Email via SMTP
+      await this.mailService.sendOtpEmail(email, otp);
+
+      return {
+        message: 'OTP sent to email',
+      };
+
+    } catch (error) {
+
+      // ✅ Preserve known errors
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // ✅ Mongo duplicate safety
+      if (error.code === 11000) {
+        throw new ConflictException('Email already exists');
+      }
+
+      console.error('EMAIL SIGNUP ERROR 👉', error);
+
+      throw new InternalServerErrorException('Something went wrong');
     }
   }
 
-  // ─── Login ────────────────────────────────────────────────────────────────
+  async loginWithEmail(dto: EmailLoginDto) {
+    try {
+      const { email, password } = dto;
 
-  // async login(dto: LoginDto) {
-  //   // findByEmail must select password explicitly, e.g. .select('+password')
-  //   const user = await this.usersService.findByEmailWithPassword(dto.email)
+      // 1️⃣ Find identity
+      const identity = await this.authIdentityModel
+        .findOne({
+          type: 'email',
+          value: email,
+        })
+        .select('+password');
 
-  //   if (!user) {
-  //     throw new UnauthorizedException('Invalid credentials')
-  //   }
+      if (!identity) {
+        throw new BadRequestException('User not found');
+      }
 
-  //   const match = await bcrypt.compare(dto.password, user.password)
-  //   if (!match) {
-  //     throw new UnauthorizedException('Invalid credentials')
-  //   }
+      if (!identity.password) {
+        throw new BadRequestException('Password not set for this user');
+      }
 
-  //   const token = await this.jwtService.signAsync({
-  //     sub: user._id,
-  //     email: user.email,
-  //   })
+      // 2️⃣ Compare password
+      const isMatch = await bcrypt.compare(password, identity.password);
 
-  //   return { access_token: token }
-  // }
+      if (!isMatch) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
 
-  // ─── PenPencil Helpers ────────────────────────────────────────────────────
+      // 3️⃣ Get user
+      const user = await this.userModel.findById(identity.userId);
 
-  /** Register a new user on PenPencil by mobile */
-  // private async registerWithPenPencil(
-  //   phone: string,
-  //   name: string,
-  // ): Promise<void> {
-  //   const [firstName, ...rest] = name.trim().split(' ')
-  //   const lastName = rest.join(' ') || ''
+      if (!user) {
+        throw new InternalServerErrorException('User data corrupted');
+      }
 
-  //   try {
-  //     await axios.post(
-  //       `https://api.penpencil.co/v1/users/register/${PENPENCIL_REG_ID}`,
-  //       {
-  //         mobile: phone,
-  //         countryCode: '+91',
-  //         firstName,
-  //         lastName,
-  //       },
-  //     )
-  //   } catch (err) {
-  //     this.handlePenPencilError(err, 'PenPencil registration failed')
-  //   }
-  // }
+      // 4️⃣ Generate JWT
+      const payload = {
+        sub: user._id.toString(),
+        email,
+      };
 
-  // /** Send OTP to mobile via PenPencil */
-  // // async sendOtp(phone: string): Promise<{ message: string }> {
-  // //   try {
-  // //     await axios.post(
-  // //       'https://api.penpencil.co/v1/users/get-otp?smsType=0',
-  // //       {
-  // //         username: phone,
-  // //         countryCode: '+91',
-  // //         organizationId: PENPENCIL_ORG_ID,
-  // //       },
-  // //     )
-  // //     return { message: 'OTP sent successfully' }
-  // //   } catch (err) {
-  // //     this.handlePenPencilError(err, 'Failed to send OTP')
-  // //   }
-  // // }
+      const accessToken = await this.jwtService.signAsync(payload);
 
-  // /** Verify OTP and return PenPencil access token */
-  // async verifyOtp(
-  //   phone: string,
-  //   otp: string,
-  // ): Promise<{ access_token: string }> {
-  //   try {
-  //     const res = await axios.post(
-  //       'https://api.penpencil.co/v3/oauth/token',
-  //       {
-  //         username: phone,
-  //         otp,
-  //         client_id: 'system-admin',
-  //         client_secret: 'KjPXuAVfC5xbmgreETNMaL7z',
-  //         grant_type: 'password',
-  //         organizationId: PENPENCIL_ORG_ID,
-  //         latitude: 0,
-  //         longitude: 0,
-  //       },
-  //     )
-  //     return { access_token: res.data?.data?.access_token }
-  //   } catch (err) {
-  //     this.handlePenPencilError(err, 'OTP verification failed')
-  //   }
-  // }
+      return {
+        user: {
+          id: user._id,
+          isProfileComplete: user.isProfileComplete,
+        },
+        accessToken,
+      };
 
-  // /** Centralised PenPencil error mapper */
-  // private handlePenPencilError(err: unknown, fallback: string): never {
-  //   if (err instanceof AxiosError) {
-  //     const status = err.response?.status
-  //     const message =
-  //       err.response?.data?.message ?? err.response?.data?.error ?? fallback
+    } catch (error) {
 
-  //     if (status === 409) throw new ConflictException(message)
-  //     if (status === 400) throw new ConflictException(message)   // bad mobile etc.
-  //     if (status === 401) throw new UnauthorizedException(message)
-  //   }
-  //   throw new InternalServerErrorException(fallback)
-  // }
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      console.error('LOGIN EMAIL ERROR 👉', error);
+
+      throw new InternalServerErrorException('Something went wrong');
+
+    }
+  }
+
+
+  async verifyEmailOtp(email: string, otp: string) {
+    try {
+      // 1️⃣ Find OTP record
+      const record = await this.emailOtpModel.findOne({ email });
+
+      if (!record) {
+        throw new BadRequestException('OTP not found');
+      }
+
+      // 2️⃣ Check expiry
+      if (record.expiresAt < new Date()) {
+        throw new BadRequestException('OTP expired');
+      }
+
+      // 3️⃣ Validate OTP
+      if (record.otp !== otp) {
+        throw new BadRequestException('Invalid OTP');
+      }
+
+      // 4️⃣ Check if user already exists (LOGIN vs SIGNUP)
+      let identity = await this.authIdentityModel.findOne({
+        type: 'email',
+        value: email,
+      });
+
+      let user;
+
+      // ✅ LOGIN
+      if (identity) {
+        user = await this.userModel.findById(identity.userId);
+
+        if (!user) {
+          throw new InternalServerErrorException('User data corrupted');
+        }
+      }
+
+      // ✅ SIGNUP
+      else {
+        user = await this.userModel.create({
+          isProfileComplete: false,
+        });
+
+        identity = await this.authIdentityModel.create({
+          userId: user._id,
+          type: 'email',
+          value: email,
+          password: record.password,
+        });
+      }
+
+      // 5️⃣ Delete OTP
+      await this.emailOtpModel.deleteOne({ email });
+
+      // 6️⃣ Generate JWT
+      const payload = {
+        sub: user._id.toString(),
+        email,
+      };
+
+      const accessToken = await this.jwtService.signAsync(payload);
+
+      return {
+        user: {
+          id: user._id,
+          isProfileComplete: user.isProfileComplete,
+        },
+        accessToken,
+      };
+
+    } catch (error) {
+
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      if (error.code === 11000) {
+        throw new ConflictException('Email already exists');
+      }
+
+      console.error('VERIFY EMAIL OTP ERROR 👉', error);
+
+      throw new InternalServerErrorException('Something went wrong');
+    }
+  }
+
+
+  async completeProfile(mobile: string, email: string, userId: string, dto: CompleteProfileDto) {
+    const { name, organization } = dto;
+
+    const primaryUser = await this.userModel.findById(userId);
+    if (!primaryUser) throw new NotFoundException('Primary user not found');
+
+    // Update name/organization regardless of mobile/email flow
+    await this.userModel.findByIdAndUpdate(userId, { name, organization });
+    console.log(name, organization, mobile, email, userId, "name")
+    // ─── MOBILE FLOW ──────────────────────────────────────────────
+    if (mobile != undefined) {
+      const { firstName, lastName } = splitName(dto.name);
+
+      try {
+        // 1️⃣ Try sending OTP directly
+        await this.pwService.sendOtp(mobile);
+      } catch (error) {
+        const message =
+          error.response?.data?.error?.message ||
+          error.response?.data?.message ||
+          error.message;
+        console.log("OTP ERROR MESSAGE:", message);
+        // 2️⃣ If user not found → register first
+        if (message?.toLowerCase().includes('not exist')) {
+          await this.pwService.registerMobile(mobile, firstName, lastName);
+
+          // 3️⃣ Retry OTP after registration
+          // await this.pwService.sendOtp(mobile);
+        } else {
+          // 4️⃣ Other errors → throw
+          throw error;
+        }
+      }
+
+      return { message: 'OTP sent successfully to your mobile.' };
+    }
+
+    // ─── EMAIL FLOW ───────────────────────────────────────────────
+    if (email != undefined) {
+      // 2️⃣ Generate OTP 
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      // 4️⃣ Store OTP + temp data (IMPORTANT)
+      await this.emailOtpModel.findOneAndUpdate(
+        { email }, // find existing OTP for this email
+        {
+          otp,
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        },
+        {
+          upsert: true, // create if not exists
+          new: true,
+        }
+      );
+
+      // 5️⃣ Send Email via SMTP
+      // console.log(first)
+      try {
+        await this.mailService.sendOtpEmail(email, otp);
+
+      } catch (error) {
+        const message =
+          error.response?.data?.error?.message ||
+          error.response?.data?.message ||
+          error.message;
+        console.log("OTP ERROR MESSAGE:", message);
+      }      // console.log(otp,"EmailOtp")
+
+      return { message: 'OTP sent successfully. Check your email.' };
+    }
+  }
+
+  // ─── CALL THIS AFTER USER SUBMITS OTP ───────────────────────────────────────
+
+  async verifyAndLinkMobile(userId: string, mobile: string, otp: string) {
+    // 1. Verify OTP
+    console.log(userId, mobile, otp, "data2")
+    try {
+      await this.pwService.verifyOtp(mobile, otp);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error; // ✅ send proper response
+      }
+
+      console.error('VERIFY EMAIL OTP ERROR 👉', error);
+
+      throw new InternalServerErrorException('OTP verification failed');
+    }
+    const session = await this.connection.startSession();
+    session.startTransaction();
+    try {
+      const primaryUser = await this.userModel.findById(userId).session(session);
+      if (!primaryUser) throw new NotFoundException('Primary user not found');
+      console.log(primaryUser, "pu")
+
+      const secondaryUser = await this.authIdentityModel.findOne({ type: "mobile", value: mobile }).session(session);
+      console.log(secondaryUser, "su")
+
+      if (!secondaryUser) {
+        // Mobile not tied to any account — just link it
+        await this.authIdentityModel.create([{ userId, type: 'mobile', value: mobile }], { session });
+        primaryUser.isProfileComplete = true;
+        await primaryUser.save({ session });
+
+        await session.commitTransaction();
+
+        return { message: 'Mobile linked successfully' };
+
+      } else {
+        if (secondaryUser.userId.toString() === userId) {
+          await session.commitTransaction();
+          return { message: 'Already linked' };
+        }
+        // Mobile belongs to another account — merge into secondary, delete primary
+        await this.remapUserReferences(secondaryUser.userId, primaryUser._id, session);
+        await this.userModel.deleteOne({ _id: secondaryUser.userId }, { session });
+        const result = await this.authIdentityModel.updateMany(
+          { userId: secondaryUser.userId },   // ✅ match by userId
+          { $set: { userId: userId } },
+          { session }      // ✅ update to new userId
+        );
+        primaryUser.isProfileComplete = true;
+        await primaryUser.save({ session });
+
+        await session.commitTransaction();
+        console.log(result, "result");
+        return { message: 'Accounts merged successfully' };
+
+      }
+    } catch (error) {
+      await session.abortTransaction();
+
+      console.error('MERGE ERROR 👉', error);
+
+      if (error instanceof HttpException) throw error;
+
+      throw new InternalServerErrorException('Merge failed');
+    } finally {
+      session.endSession();
+    }
+
+  }
+
+
+
+
+  async verifyAndLinkEmail(userId: string, email: string, otp: string) {
+    // 1. Verify OTP
+    try {
+      await this.verifyEmailOtpForMerge(email, otp);
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error; // ✅ send proper response
+      }
+
+      console.error('VERIFY EMAIL OTP ERROR 👉', error);
+
+      throw new InternalServerErrorException('OTP verification failed');
+    }
+
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      const primaryUser = await this.userModel.findById(userId).session(session);
+      if (!primaryUser) throw new NotFoundException('Primary user not found');
+      console.log(primaryUser, "pu")
+      console.log(email, "email")
+      // const secondaryUser = await this.userModel.findOne({ email });
+      const secondaryUser = await this.authIdentityModel.findOne({ type: "email", value: email }).session(session);
+      console.log(secondaryUser, "su")
+      if (!secondaryUser) {
+        console.log("abir sharma")
+        // Link email
+        const plainPassword = generateRandomPassword();
+        const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+        await this.authIdentityModel.create(
+          [{ userId, type: 'email', value: email, password: hashedPassword }],
+          { session }
+        );
+
+        try {
+          await this.mailService.sendEmailWithPassword(email, plainPassword);
+
+        } catch (error) {
+          if (error instanceof HttpException) {
+            throw error; // ✅ send proper response
+          }
+
+          console.error('Set password link send fail 👉', error);
+
+          throw new InternalServerErrorException('Set password link not sent.');
+        }
+
+        primaryUser.isProfileComplete = true;
+        await primaryUser.save({ session });
+
+        await session.commitTransaction();
+
+        return { message: 'Email linked successfully. Please check your email for password.' };
+
+      } else {
+
+        if (secondaryUser.userId.toString() === userId) {
+          await session.commitTransaction();
+          return { message: 'Already linked' };
+        }
+        await this.remapUserReferences(secondaryUser.userId, primaryUser._id, session);
+        await this.userModel.deleteOne({ _id: secondaryUser.userId }, { session });
+
+        const result = await this.authIdentityModel.updateMany(
+          { userId: secondaryUser.userId },   // ✅ match by userId
+          { $set: { userId: userId } },
+          { session }      // ✅ update to new userId
+        );
+
+        console.log(result, "result");
+        primaryUser.isProfileComplete = true;
+        await primaryUser.save({ session });
+
+        await session.commitTransaction();
+
+        return { message: 'Accounts merged successfully' };
+
+      }
+
+    } catch (error) {
+      await session.abortTransaction();
+
+      console.error('MERGE ERROR 👉', error);
+
+      if (error instanceof HttpException) throw error;
+
+      throw new InternalServerErrorException('Merge failed');
+    } finally {
+      session.endSession();
+    }
+
+  }
+
+  async verifyEmailOtpForMerge(email: string, otp: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // 1️⃣ Find OTP record
+    const record = await this.emailOtpModel.findOne({
+      email: normalizedEmail,
+    });
+
+    if (!record) {
+      throw new BadRequestException('OTP not found');
+    }
+
+    // 2️⃣ Check expiry
+    if (record.expiresAt < new Date()) {
+      throw new BadRequestException('OTP expired');
+    }
+
+    // 3️⃣ Validate OTP
+    if (record.otp !== otp) {
+      throw new BadRequestException('Invalid OTP');
+    }
+
+    // 4️⃣ Delete OTP (one-time use)
+    await this.emailOtpModel.deleteOne({ email: normalizedEmail });
+
+    // 5️⃣ Return success
+    return {
+      success: true,
+      message: 'OTP verified successfully',
+    };
+  }
+
+  // ─── REMAP HELPER ────────────────────────────────────────────────────────────
+
+  private async remapUserReferences(
+    fromId: Types.ObjectId,
+    toId: Types.ObjectId,
+    session: ClientSession
+  ) {
+    await Promise.all([
+      this.authIdentityModel.updateMany(
+        { userId: fromId },
+        { $set: { userId: toId } },
+        { session }
+      ),
+
+      this.meetingModel.updateMany(
+        { createdBy: fromId },
+        { $set: { createdBy: toId } },
+        { session }
+      ),
+
+      this.deviceModel.updateMany(
+        { pairedUserId: fromId },
+        { $set: { pairedUserId: toId } },
+        { session }
+      ),
+
+      this.voiceProfileModel.updateMany(
+        { userId: fromId },
+        { $set: { userId: toId } },
+        { session }
+      ),
+    ]);
+  }
+
 
   async changePassword(
     userId: string,
     currentPassword: string,
     newPassword: string
   ) {
-
-    const user = await this.usersService.findOne(userId);
-    if (!user || !user.password) {
-      throw new UnauthorizedException("Invalid credentials")
+    // 1️⃣ Get user with password
+    const identity = await this.authIdentityModel
+      .findOne({ userId, type: "email" })
+      .select("+password");
+    if (!identity) {
+      throw new NotFoundException("User not found");
     }
 
-    if (!user) {
-      throw new Error("User not found")
+    if (!identity.password) {
+      throw new BadRequestException("Password not set for this account");
     }
 
-    const isMatch = await bcrypt.compare(currentPassword, user.password)
+    // 2️⃣ Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, identity.password);
 
     if (!isMatch) {
-      throw new Error("Current password is incorrect")
+      throw new BadRequestException("Current password is incorrect");
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10)
+    // 3️⃣ Prevent same password reuse
+    const isSame = await bcrypt.compare(newPassword, identity.password);
 
-    user.password = hashedPassword
-    await user.save()
+    if (isSame) {
+      throw new BadRequestException(
+        "New password cannot be same as current password"
+      );
+    }
 
-    return { message: "Password updated successfully" }
+    // 4️⃣ Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // 5️⃣ Update password
+    identity.password = hashedPassword;
+    await identity.save();
+
+    return {
+      message: "Password changed successfully",
+    };
   }
 
   async forgotPassword(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    console.log(email, "email")
+    // 1️⃣ Find user
+    const identity = await this.authIdentityModel.findOne({ value: normalizedEmail });
 
-    const user = await this.usersService.findByEmail(email);
-
-    if (!user) {
-      throw new Error("User not found")
+    if (!identity) {
+      throw new NotFoundException("User with this email does not exist");
     }
 
-    const otp = Math.floor(1000 + Math.random() * 9000).toString()
+    // 2️⃣ Generate OTP (6-digit)
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    const hashedOtp = await bcrypt.hash(otp, 10)
+    // 3️⃣ Set expiry (10 minutes)
+    const expires = new Date(Date.now() + 10 * 60 * 1000);
 
-    user.resetPasswordOtp = hashedOtp
-    user.resetPasswordOtpExpires = new Date(Date.now() + 10 * 60 * 1000)
+    // 4️⃣ Save OTP in DB
+    identity.resetPasswordOtp = otp;
+    identity.resetPasswordOtpExpires = expires;
 
-    await user.save()
+    await identity.save();
 
+    // 5️⃣ Send OTP (you already have mailService)
+    await this.mailService.sendOtpEmail(normalizedEmail, otp);
 
-    return { message: "OTP sent to email" }
+    return {
+      message: "OTP sent to email",
+    };
   }
 
   async resetPassword(
@@ -306,36 +798,55 @@ export class AuthService {
     otp: string,
     newPassword: string
   ) {
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const user = await this.usersService.findByEmail(email)
+    // 1️⃣ Find user with OTP fields
+    const identity = await this.authIdentityModel
+      .findOne({ value: normalizedEmail })
+      .select("+password +resetPasswordOtp +resetPasswordOtpExpires");
 
-    if (!user) {
-      throw new Error("User not found")
+    if (!identity) {
+      throw new NotFoundException("User not found");
     }
 
-    if (!user.resetPasswordOtp || !user.resetPasswordOtpExpires) {
-      throw new Error("OTP not found")
+    // 2️⃣ Check OTP exists
+    if (!identity.resetPasswordOtp || !identity.resetPasswordOtpExpires) {
+      throw new BadRequestException("OTP not requested");
     }
 
-    if (user.resetPasswordOtpExpires < new Date()) {
-      throw new Error("OTP expired")
+    // 3️⃣ Check expiry
+    if (identity.resetPasswordOtpExpires < new Date()) {
+      throw new BadRequestException("OTP expired");
     }
 
-    const isValid = await bcrypt.compare(otp, user.resetPasswordOtp)
-
-    if (!isValid) {
-      throw new Error("Invalid OTP")
+    // 4️⃣ Validate OTP
+    if (identity.resetPasswordOtp !== otp) {
+      throw new BadRequestException("Invalid OTP");
+    }
+    if (!identity.password) {
+      throw new BadRequestException("Password not set for this account");
+    }
+    // 5️⃣ Prevent same password reuse
+    const isSame = await bcrypt.compare(newPassword, identity.password);
+    if (isSame) {
+      throw new BadRequestException(
+        "New password cannot be same as old password"
+      );
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10)
+    // 6️⃣ Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    user.password = hashedPassword
-    user.resetPasswordOtp = null
-    user.resetPasswordOtpExpires = null
+    // 7️⃣ Update password + clear OTP
+    identity.password = hashedPassword;
+    identity.resetPasswordOtp = null;
+    identity.resetPasswordOtpExpires = null;
 
-    await user.save()
+    await identity.save();
 
-    return { message: "Password reset successful" }
+    return {
+      message: "Password reset successfully",
+    };
   }
 
 }

@@ -20,16 +20,16 @@ export class UsersService {
     private readonly userModel: Model<UserDocument>,
   ) { }
 
-  async findByEmail(email: string) {
-    return this.userModel
-      .findOne({ email })
-      .select('+password')
-      .select("+resetPasswordOtp +resetPasswordOtpExpires");
-  }
+  // async findByEmail(email: string) {
+  //   return this.userModel
+  //     .findOne({ email })
+  //     .select('+password')
+  //     .select("+resetPasswordOtp +resetPasswordOtpExpires");
+  // }
 
-  async findByMobile(mobile: string) {
-    return this.userModel.findOne({ mobile }).select("+password");
-  }
+  // async findByMobile(mobile: string) {
+  //   return this.userModel.findOne({ mobile }).select("+password");
+  // }
 
   // users.service.ts  — only the two relevant methods shown
   // async findByEmail(email: string) {
@@ -66,7 +66,8 @@ export class UsersService {
   async findOne(id: string) {
     const user = await this.userModel
       .findById(id)
-      .select('-password');
+      .select('-password')
+
     if (!user) {
       throw new NotFoundException('User not found');
     }
@@ -110,4 +111,36 @@ export class UsersService {
 
     return { message: 'User deleted successfully' };
   }
+
+
+
+  // user.service.ts
+
+async findByEmail(email: string, includePassword = false) {
+  const query = this.userModel.findOne({ email })
+
+  if (includePassword) {
+    query.select('+password')
+  }
+
+  return query
+}
+
+async findByMobile(mobile: string, includeOtp = false) {
+  const query = this.userModel.findOne({ mobile })
+
+  if (includeOtp) {
+    query.select('+resetPasswordOtp +resetPasswordOtpExpires')
+  }
+
+  return query
+}
+
+async createUser(data: Partial<User>) {
+  return this.userModel.create(data)
+}
+
+async updateUser(id: string, data: Partial<User>) {
+  return this.userModel.findByIdAndUpdate(id, data, { new: true })
+}
 }

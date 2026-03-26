@@ -1,13 +1,11 @@
 import { ApiProperty } from "@nestjs/swagger"
 import { IsOptional, IsString, Matches } from "class-validator"
 
-export class VerifyOtpDto {
+export class VerifyEmailOtpDto {
 
-  @ApiProperty({ example: "8585927441" })
-  @Matches(/^\d{10}$/, { message: 'Mobile must be a 10-digit number' })
-  @IsOptional()
+  @ApiProperty({ example: "abir@gmail.com" })
   @IsString()
-  mobile: string
+  email: string
 
   @ApiProperty({ example: "858323" })
   @IsString()

@@ -7,40 +7,41 @@ export class PwAuthService {
     private organizationId = "5eb393ee95fab7468a79d189"
 
     async registerMobile(mobile: string, firstName: string, lastName: string) {
-  try {
+        console.log(mobile,firstName,lastName)
+        try {
 
-    const res = await axios.post(
-      `https://api.penpencil.co/v1/users/register/${this.organizationId}`,
-      {
-        mobile,
-        countryCode: "+91",
-        firstName,
-        lastName
-      }
-    )
+            const res = await axios.post(
+                `https://api.penpencil.co/v1/users/register/${this.organizationId}`,
+                {
+                    mobile,
+                    countryCode: "+91",
+                    firstName,
+                    lastName
+                }
+            )
 
-    return res.data
+            return res.data
 
-  } catch (error: any) {
+        } catch (error: any) {
 
-    const message =
-      error.response?.data?.error?.message ||
-      error.response?.data?.message ||
-      "Mobile registration failed"
+            const message =
+                error.response?.data?.error?.message ||
+                error.response?.data?.message ||
+                "Mobile registration failed"
 
+            console.log(message,"message2")
+            if (message.toLowerCase().includes("exist")) {
+                throw new ConflictException(message)
+            }
 
-    if (message.toLowerCase().includes("exist")) {
-      throw new ConflictException(message)
+            throw new BadRequestException(message)
+        }
     }
-
-    throw new BadRequestException(message)
-  }
-}
 
     async sendOtp(mobile: string) {
         const phone = mobile;
         try {
-            
+
             const res = await axios.post("https://api.penpencil.co/v1/users/get-otp?smsType=0", {
                 username: phone,
                 countryCode: "+91",

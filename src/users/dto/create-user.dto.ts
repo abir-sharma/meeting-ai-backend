@@ -1,16 +1,14 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateUserDto {
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: "abir@gmail.com",
-    required: false
   })
   email?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: "8585838338",
-    required: false
   })
   mobile?: string;
 
@@ -19,14 +17,13 @@ export class CreateUserDto {
   })
   password?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({   // ✅ FIX HERE
     example: "Abir Sharma"
   })
-  name: string;
+  name?: string;
 
   @ApiPropertyOptional({
     example: "Physics Wallah"
   })
   organization?: string;
-
 }

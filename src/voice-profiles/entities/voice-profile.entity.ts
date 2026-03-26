@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type VoiceProfileDocument = VoiceProfile & Document;
 
@@ -9,8 +9,12 @@ export class VoiceProfile {
   @Prop({ required: true })
   name: string;
 
-  @Prop({ required: true })
-  userId: string;
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'User',
+    required: false,
+  })
+  userId: Types.ObjectId;
 
   @Prop({ type: [Number], required: true })
   voiceEmbedding: number[];
