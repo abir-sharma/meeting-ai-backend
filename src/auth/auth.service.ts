@@ -2,12 +2,12 @@ import { BadRequestException, ConflictException, HttpException, Injectable, Inte
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PwAuthService } from './pw-auth.service';
-import { MobileSignupDto } from './dto/signup-mobile.dto';
+import { MobileSignupDto, SignupDto } from './dto/signup-mobile.dto';
 import { User } from 'src/users/entities/user.entity';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { AuthIdentity } from 'src/auth/entities/auth_identities.entity';
-import { MobileLoginDto } from './dto/login-mobile.dto';
+import { LoginDto, MobileLoginDto } from './dto/login-mobile.dto';
 import { EmailSignupDto } from './dto/signup-email.dto';
 import { EmailLoginDto } from './dto/login-email.dto';
 import { CompleteProfileDto } from './dto/complete-mobile-profile.dto';
@@ -19,6 +19,8 @@ import { Device } from 'src/devices/entities/device.entity';
 import { VoiceProfile } from 'src/voice-profiles/entities/voice-profile.entity';
 import * as crypto from "crypto"
 import { SetPasswordDto } from './dto/set-email-password.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { LinkProfileDto } from './dto/link-mobile.dto';
 
 @Injectable()
 export class AuthService {
@@ -37,6 +39,101 @@ export class AuthService {
     @InjectModel('VoiceProfile') private readonly voiceProfileModel: Model<VoiceProfile>,
 
   ) { }
+
+  async signup(dto: SignupDto) {
+    if (dto.type === 'email') {
+      if (!dto.email || !dto.password) {
+        throw new BadRequestException('Email and password are required');
+      }
+
+      return this.signupWithEmail({
+        email: dto.email,
+        password: dto.password,
+      });
+    }
+
+    if (dto.type === 'mobile') {
+      if (!dto.mobile || !dto.name) {
+        throw new BadRequestException('Name and Mobile are required');
+      }
+
+
+      return this.signupWithMobile({
+        name: dto.name,
+        mobile: dto.mobile,
+      });
+    }
+
+    throw new BadRequestException('Invalid signup type');
+  }
+
+  async login(dto: LoginDto) {
+    if (dto.type === 'email') {
+      if (!dto.email || !dto.password) {
+        throw new BadRequestException('Email and password are required');
+      }
+
+      return this.loginWithEmail({
+        email: dto.email,
+        password: dto.password,
+      });
+    }
+
+    if (dto.type === 'mobile') {
+      if (!dto.mobile) {
+        throw new BadRequestException('Mobile is required');
+      }
+
+
+      return this.loginWithMobile({
+        mobile: dto.mobile,
+      });
+    }
+
+    throw new BadRequestException('Invalid signup type');
+  }
+
+  async verifyOtp(dto: VerifyOtpDto) {
+    if (dto.type === 'email') {
+      if (!dto.email || !dto.otp) {
+        throw new BadRequestException('Email and otp are required');
+      }
+
+      return this.verifyEmailOtp(dto.email, dto.otp);
+    }
+
+    if (dto.type === 'mobile' || !dto.otp) {
+      if (!dto.mobile || !dto.otp) {
+        throw new BadRequestException('Mobile and otp are required');
+      }
+
+
+      return this.verifyMobileOtp(dto.mobile, dto.otp);
+    }
+
+    throw new BadRequestException('Invalid signup type');
+  }
+
+  async linkProfile(userId: string, dto: LinkProfileDto) {
+    if (dto.type === 'email') {
+      if (!dto.email || !dto.otp) {
+        throw new BadRequestException('Email and otp are required');
+      }
+
+      return this.verifyAndLinkEmail(userId, dto.email, dto.otp);
+    }
+
+    if (dto.type === 'mobile' || !dto.otp) {
+      if (!dto.mobile || !dto.otp) {
+        throw new BadRequestException('Mobile and otp are required');
+      }
+
+
+      return this.verifyAndLinkMobile(userId, dto.mobile, dto.otp);
+    }
+
+    throw new BadRequestException('Invalid signup type');
+  }
 
   async signupWithMobile(dto: MobileSignupDto) {
     const { mobile, name } = dto;
@@ -129,66 +226,129 @@ export class AuthService {
     return { message: 'OTP sent for login' };
   }
 
-  async verifyOtp(mobile: string, otp: string) {
-    try {
-      // 1️⃣ Verify OTP via provider
-      await this.pwService.verifyOtp(mobile, otp);
+  // async verifyOtp(mobile: string, otp: string) {
+  //   try {
+  //     // 1️⃣ Verify OTP via provider
+  //     await this.pwService.verifyOtp(mobile, otp);
 
-      // 2️⃣ Check identity
+  //     // 2️⃣ Check identity
+  //     let identity = await this.authIdentityModel.findOne({
+  //       type: 'mobile',
+  //       value: mobile,
+  //     });
+
+  //     let user;
+
+  //     // LOGIN
+  //     if (identity) {
+  //       user = await this.userModel.findById(identity.userId);
+
+  //       if (!user) {
+  //         throw new InternalServerErrorException('User data corrupted');
+  //       }
+  //     }
+
+  //     // SIGNUP
+  //     else {
+  //       user = await this.userModel.create({
+  //         isProfileComplete: false,
+  //       });
+
+  //       identity = await this.authIdentityModel.create({
+  //         userId: user._id.toString(),
+  //         type: 'mobile',
+  //         value: mobile,
+  //       });
+  //     }
+
+  //     // JWT
+  //     const payload = {
+  //       sub: user._id.toString(),
+  //       mobile,
+  //     };
+
+  //     const accessToken = await this.jwtService.signAsync(payload);
+
+  //     return {
+  //       user: {
+  //         id: user._id,
+  //         name: user.name,
+  //         isProfileComplete: user.isProfileComplete,
+  //       },
+  //       accessToken,
+  //     };
+
+  //   } catch (error) {
+
+  //     // ✅ 🔥 MOST IMPORTANT LINE
+  //     if (error instanceof HttpException) {
+  //       throw error; // 👈 preserve original error (400, 401, etc.)
+  //     }
+
+  //     // Mongo duplicate
+  //     if (error.code === 11000) {
+  //       throw new ConflictException('Mobile already exists');
+  //     }
+
+  //     console.error('VERIFY OTP ERROR 👉', error);
+
+  //     throw new InternalServerErrorException('Something went wrong');
+  //   }
+  // }
+  async verifyMobileOtp(mobile: string, otp: string) {
+    try {
+      const normalizedMobile = mobile.trim();
+
+      // 1️⃣ Verify OTP
+      await this.pwService.verifyOtp(normalizedMobile, otp);
+
+      // 2️⃣ Find identity
       let identity = await this.authIdentityModel.findOne({
         type: 'mobile',
-        value: mobile,
+        value: normalizedMobile,
       });
 
       let user;
 
-      // LOGIN
       if (identity) {
         user = await this.userModel.findById(identity.userId);
 
         if (!user) {
           throw new InternalServerErrorException('User data corrupted');
         }
-      }
-
-      // SIGNUP
-      else {
+      } else {
         user = await this.userModel.create({
           isProfileComplete: false,
         });
 
         identity = await this.authIdentityModel.create({
-          userId: user._id.toString(),
+          userId: user._id,
           type: 'mobile',
-          value: mobile,
+          value: normalizedMobile,
         });
       }
 
-      // JWT
+      // 3️⃣ Generate JWT
       const payload = {
         sub: user._id.toString(),
-        mobile,
+        mobile: normalizedMobile,
       };
 
       const accessToken = await this.jwtService.signAsync(payload);
 
+      // 4️⃣ Reuse response builder
+      const userResponse = await this.buildUserResponse(user._id);
+
       return {
-        user: {
-          id: user._id,
-          name: user.name,
-          isProfileComplete: user.isProfileComplete,
-        },
+        user: userResponse,
         accessToken,
       };
 
     } catch (error) {
-
-      // ✅ 🔥 MOST IMPORTANT LINE
       if (error instanceof HttpException) {
-        throw error; // 👈 preserve original error (400, 401, etc.)
+        throw error;
       }
 
-      // Mongo duplicate
       if (error.code === 11000) {
         throw new ConflictException('Mobile already exists');
       }
@@ -198,8 +358,6 @@ export class AuthService {
       throw new InternalServerErrorException('Something went wrong');
     }
   }
-
-
 
 
   async signupWithEmail(dto: EmailSignupDto) {
@@ -261,15 +419,163 @@ export class AuthService {
     }
   }
 
+  // async loginWithEmail(dto: EmailLoginDto) {
+  //   try {
+  //     const { email, password } = dto;
+
+  //     // 1️⃣ Find identity
+  //     const identity = await this.authIdentityModel
+  //       .findOne({
+  //         type: 'email',
+  //         value: email,
+  //       })
+  //       .select('+password');
+
+  //     if (!identity) {
+  //       throw new BadRequestException('User not found');
+  //     }
+
+  //     if (!identity.password) {
+  //       throw new BadRequestException('Password not set for this user');
+  //     }
+
+  //     // 2️⃣ Compare password
+  //     const isMatch = await bcrypt.compare(password, identity.password);
+
+  //     if (!isMatch) {
+  //       throw new UnauthorizedException('Invalid credentials');
+  //     }
+
+  //     // 3️⃣ Get user
+  //     const user = await this.userModel.findById(identity.userId);
+
+  //     if (!user) {
+  //       throw new InternalServerErrorException('User data corrupted');
+  //     }
+
+  //     // 4️⃣ Generate JWT
+  //     const payload = {
+  //       sub: user._id.toString(),
+  //       email,
+  //     };
+
+  //     const accessToken = await this.jwtService.signAsync(payload);
+  //     return {
+  //       user: {
+  //         id: user._id,
+  //         isProfileComplete: user.isProfileComplete,
+  //       },
+  //       accessToken,
+  //     };
+
+  //   } catch (error) {
+
+  //     if (error instanceof HttpException) {
+  //       throw error;
+  //     }
+
+  //     console.error('LOGIN EMAIL ERROR 👉', error);
+
+  //     throw new InternalServerErrorException('Something went wrong');
+
+  //   }
+  // }
+
+
+  // async verifyEmailOtp(email: string, otp: string) {
+  //   try {
+  //     // 1️⃣ Find OTP record
+  //     const record = await this.emailOtpModel.findOne({ email });
+
+  //     if (!record) {
+  //       throw new BadRequestException('OTP not found');
+  //     }
+
+  //     // 2️⃣ Check expiry
+  //     if (record.expiresAt < new Date()) {
+  //       throw new BadRequestException('OTP expired');
+  //     }
+
+  //     // 3️⃣ Validate OTP
+  //     if (record.otp !== otp) {
+  //       throw new BadRequestException('Invalid OTP');
+  //     }
+
+  //     // 4️⃣ Check if user already exists (LOGIN vs SIGNUP)
+  //     let identity = await this.authIdentityModel.findOne({
+  //       type: 'email',
+  //       value: email,
+  //     });
+
+  //     let user;
+
+  //     // ✅ LOGIN
+  //     if (identity) {
+  //       user = await this.userModel.findById(identity.userId);
+
+  //       if (!user) {
+  //         throw new InternalServerErrorException('User data corrupted');
+  //       }
+  //     }
+
+  //     // ✅ SIGNUP
+  //     else {
+  //       user = await this.userModel.create({
+  //         isProfileComplete: false,
+  //       });
+
+  //       identity = await this.authIdentityModel.create({
+  //         userId: user._id,
+  //         type: 'email',
+  //         value: email,
+  //         password: record.password,
+  //       });
+  //     }
+
+  //     // 5️⃣ Delete OTP
+  //     await this.emailOtpModel.deleteOne({ email });
+
+  //     // 6️⃣ Generate JWT
+  //     const payload = {
+  //       sub: user._id.toString(),
+  //       email,
+  //     };
+
+  //     const accessToken = await this.jwtService.signAsync(payload);
+
+  //     return {
+  //       user: {
+  //         id: user._id,
+  //         isProfileComplete: user.isProfileComplete,
+  //       },
+  //       accessToken,
+  //     };
+
+  //   } catch (error) {
+
+  //     if (error instanceof HttpException) {
+  //       throw error;
+  //     }
+
+  //     if (error.code === 11000) {
+  //       throw new ConflictException('Email already exists');
+  //     }
+
+  //     console.error('VERIFY EMAIL OTP ERROR 👉', error);
+
+  //     throw new InternalServerErrorException('Something went wrong');
+  //   }
+  // }
   async loginWithEmail(dto: EmailLoginDto) {
     try {
       const { email, password } = dto;
+      const normalizedEmail = email.trim().toLowerCase();
 
       // 1️⃣ Find identity
       const identity = await this.authIdentityModel
         .findOne({
           type: 'email',
-          value: email,
+          value: normalizedEmail,
         })
         .select('+password');
 
@@ -295,24 +601,45 @@ export class AuthService {
         throw new InternalServerErrorException('User data corrupted');
       }
 
-      // 4️⃣ Generate JWT
+      // 4️⃣ Get ALL identities (email + mobile)
+      const identities = await this.authIdentityModel.find({
+        userId: user._id,
+      });
+
+      const emailValue =
+        identities.find((i) => i.type === 'email')?.value || null;
+
+      const mobileValue =
+        identities.find((i) => i.type === 'mobile')?.value || null;
+
+      // 5️⃣ Generate JWT
       const payload = {
         sub: user._id.toString(),
-        email,
+        email: emailValue,
       };
 
       const accessToken = await this.jwtService.signAsync(payload);
 
+      // 6️⃣ Build response
+      const userResponse: any = {
+        id: user._id,
+        isProfileComplete: user.isProfileComplete,
+        email: emailValue,
+        mobile: mobileValue,
+      };
+
+      // ✅ Add profile details only if complete
+      if (user.isProfileComplete) {
+        userResponse.name = user.name;
+        userResponse.organization = user.organization;
+      }
+
       return {
-        user: {
-          id: user._id,
-          isProfileComplete: user.isProfileComplete,
-        },
+        user: userResponse,
         accessToken,
       };
 
     } catch (error) {
-
       if (error instanceof HttpException) {
         throw error;
       }
@@ -320,15 +647,15 @@ export class AuthService {
       console.error('LOGIN EMAIL ERROR 👉', error);
 
       throw new InternalServerErrorException('Something went wrong');
-
     }
   }
 
-
   async verifyEmailOtp(email: string, otp: string) {
     try {
+      const normalizedEmail = email.trim().toLowerCase();
+
       // 1️⃣ Find OTP record
-      const record = await this.emailOtpModel.findOne({ email });
+      const record = await this.emailOtpModel.findOne({ email: normalizedEmail });
 
       if (!record) {
         throw new BadRequestException('OTP not found');
@@ -344,10 +671,10 @@ export class AuthService {
         throw new BadRequestException('Invalid OTP');
       }
 
-      // 4️⃣ Check if user already exists (LOGIN vs SIGNUP)
+      // 4️⃣ Find identity
       let identity = await this.authIdentityModel.findOne({
         type: 'email',
-        value: email,
+        value: normalizedEmail,
       });
 
       let user;
@@ -370,32 +697,55 @@ export class AuthService {
         identity = await this.authIdentityModel.create({
           userId: user._id,
           type: 'email',
-          value: email,
+          value: normalizedEmail,
           password: record.password,
         });
       }
 
       // 5️⃣ Delete OTP
-      await this.emailOtpModel.deleteOne({ email });
+      await this.emailOtpModel.deleteOne({ email: normalizedEmail });
 
-      // 6️⃣ Generate JWT
+      // 6️⃣ Get ALL identities (email + mobile)
+      const identities = await this.authIdentityModel.find({
+        userId: user._id,
+      });
+
+      let emailValue: string | null = null;
+      let mobileValue: string | null = null;
+
+      identities.forEach((item) => {
+        if (item.type === 'email') emailValue = item.value;
+        if (item.type === 'mobile') mobileValue = item.value;
+      });
+
+      // 7️⃣ Generate JWT
       const payload = {
         sub: user._id.toString(),
-        email,
+        email: emailValue,
       };
 
       const accessToken = await this.jwtService.signAsync(payload);
 
+      // 8️⃣ Build response conditionally
+      const userResponse: any = {
+        id: user._id,
+        isProfileComplete: user.isProfileComplete,
+        email: emailValue,
+        mobile: mobileValue,
+      };
+
+      // ✅ Only include profile details if complete
+      if (user.isProfileComplete) {
+        userResponse.name = user.name;
+        userResponse.organization = user.organization;
+      }
+
       return {
-        user: {
-          id: user._id,
-          isProfileComplete: user.isProfileComplete,
-        },
+        user: userResponse,
         accessToken,
       };
 
     } catch (error) {
-
       if (error instanceof HttpException) {
         throw error;
       }
@@ -436,9 +786,6 @@ export class AuthService {
         // 2️⃣ If user not found → register first
         if (message?.toLowerCase().includes('not exist')) {
           await this.pwService.registerMobile(mobile, firstName, lastName);
-
-          // 3️⃣ Retry OTP after registration
-          // await this.pwService.sendOtp(mobile);
         } else {
           // 4️⃣ Other errors → throw
           throw error;
@@ -553,7 +900,30 @@ export class AuthService {
 
   }
 
+  private async buildUserResponse(userId: string) {
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    const identities = await this.authIdentityModel.find({ userId });
 
+    const email = identities.find(i => i.type === 'email')?.value || null;
+    const mobile = identities.find(i => i.type === 'mobile')?.value || null;
+
+    const response: any = {
+      id: user._id,
+      isProfileComplete: user.isProfileComplete,
+      email,
+      mobile,
+    };
+
+    if (user.isProfileComplete) {
+      response.name = user.name;
+      response.organization = user.organization;
+    }
+
+    return response;
+  }
 
 
   async verifyAndLinkEmail(userId: string, email: string, otp: string) {

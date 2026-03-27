@@ -1,12 +1,10 @@
 import { Controller, Post, Body, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { CompleteProfileDto } from './dto/complete-mobile-profile.dto';
-import { MobileSignupDto } from './dto/signup-mobile.dto';
-import { MobileLoginDto } from './dto/login-mobile.dto';
-import { EmailSignupDto } from './dto/signup-email.dto';
-import { EmailLoginDto } from './dto/login-email.dto';
-import { LinkMobileDto } from './dto/link-mobile.dto';
-import { VerifyOtpDto } from './dto/verify.dto';
+import { SignupDto } from './dto/signup-mobile.dto';
+import { LoginDto } from './dto/login-mobile.dto';
+import { LinkMobileDto, LinkProfileDto } from './dto/link-mobile.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { VerifyEmailOtpDto } from './dto/verify-email-otp.dto';
 import { ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -19,58 +17,32 @@ export class AuthController {
 
   constructor(private authService: AuthService) { }
 
-  // 🔹 Mobile Signup
-  @Post('signup/mobile')
+  @Post('signup')
   @ApiOperation({
-    summary: 'Signup using mobile number',
-    description: 'This Api can be used to signup using mobile number',
+    summary: 'Signup',
+    description: 'This Api is used to signup',
   })
-  signupMobile(@Body() dto: MobileSignupDto) {
-    return this.authService.signupWithMobile(dto);
+  signup(@Body() dto: SignupDto) {
+    return this.authService.signup(dto);
   }
 
-
   // 🔹 Mobile Login
-  @Post('login/mobile')
+  @Post('login')
   @ApiOperation({
-    summary: 'Login via mobile number',
+    summary: 'Login',
   })
-  loginMobile(@Body() dto: MobileLoginDto) {
-    return this.authService.loginWithMobile(dto);
+  login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
   }
 
   @Post('verify-otp')
   @ApiOperation({
-    summary: 'Verify Otp sent by PW on mobile number for login and signup',
+    summary: 'Verify Otp for login and signup',
   })
   verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.mobile, dto.otp);
+    return this.authService.verifyOtp(dto);
   }
 
-  // auth.controller.ts
-  @Post('signup/email')
-  @ApiOperation({
-    summary: 'Signup via email Id',
-  })
-  signupEmail(@Body() dto: EmailSignupDto) {
-    return this.authService.signupWithEmail(dto);
-  }
-
-  @Post('login/email')
-  @ApiOperation({
-    summary: 'Login via email Id',
-  })
-  loginEmail(@Body() dto: EmailLoginDto) {
-    return this.authService.loginWithEmail(dto);
-  }
-
-  @Post('verify-email-otp')
-  @ApiOperation({
-    summary: 'Verify Otp sent on email for login or signup',
-  })
-  verifyEmailOtp(@Body() dto: VerifyEmailOtpDto) {
-    return this.authService.verifyEmailOtp(dto.email, dto.otp);
-  }
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
@@ -95,23 +67,12 @@ export class AuthController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @Post('link-mobile')
+  @Post('link-profile')
   @ApiOperation({
     summary: 'if user logged in via email and want to add mobile use this api otp will already sent to mobile number by complete profile api.',
   })
-  linkMobile(@Req() req, @Body() dto: LinkMobileDto) {
-    return this.authService.verifyAndLinkMobile(req.user.userId, dto.mobile, dto.otp);
-  }
-
-
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
-  @Post('link-email')
-  @ApiOperation({
-    summary: 'if user logged in via email and want to add email use this api otp will already sent to email by complete profile api.',
-  })
-  linkEmail(@Req() req, @Body() dto: VerifyEmailOtpDto) {
-    return this.authService.verifyAndLinkEmail(req.user.userId, dto.email, dto.otp);
+  linkProfile(@Req() req, @Body() dto: LinkProfileDto) {
+    return this.authService.linkProfile(req.user.userId, dto);
   }
 
 
