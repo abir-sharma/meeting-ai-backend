@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 
 import { InjectModel } from '@nestjs/mongoose';
@@ -22,23 +23,31 @@ export class MeetingSpeakerSegmentsService {
   constructor(
     @InjectModel(MeetingSpeakerSegment.name)
     private readonly segmentModel: Model<MeetingSpeakerSegmentDocument>,
-  ) {}
+  ) { }
 
-  async create(createDto: CreateMeetingSpeakerSegmentDto) {
+  async create(
+    createDto: CreateMeetingSpeakerSegmentDto,
+  ) {
 
     try {
 
-      const segment = new this.segmentModel(createDto);
+      const segment =
+        new this.segmentModel(createDto);
 
       return await segment.save();
 
     } catch (error: any) {
 
       if (error.code === 11000) {
-        throw new ConflictException('Duplicate speaker segment');
+
+        throw new ConflictException(
+          'Duplicate speaker segment',
+        );
       }
 
-      throw error;
+      throw new InternalServerErrorException(
+        error.message,
+      );
     }
   }
 

@@ -14,12 +14,11 @@ import { User, UserDocument } from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
-
   constructor(
     @InjectModel(User.name)
     private readonly userModel: Model<UserDocument>,
   ) { }
-
+  
   // async findByEmail(email: string) {
   //   return this.userModel
   //     .findOne({ email })
@@ -62,6 +61,7 @@ export class UsersService {
       .find()
       .select('-password');
   }
+  
 
   async findOne(id: string) {
     const user = await this.userModel
@@ -75,10 +75,11 @@ export class UsersService {
     return user;
   }
 
+  
+
   async update(id: string, updateUserDto: UpdateUserDto) {
 
     try {
-
       const user = await this.userModel
         .findByIdAndUpdate(id, updateUserDto, {
           new: true,
@@ -100,7 +101,7 @@ export class UsersService {
       throw error;
     }
   }
-
+   
   async remove(id: string) {
 
     const user = await this.userModel.findByIdAndDelete(id);
@@ -111,8 +112,6 @@ export class UsersService {
 
     return { message: 'User deleted successfully' };
   }
-
-
 
   // user.service.ts
 
@@ -125,6 +124,7 @@ async findByEmail(email: string, includePassword = false) {
 
   return query
 }
+
 
 async findByMobile(mobile: string, includeOtp = false) {
   const query = this.userModel.findOne({ mobile })

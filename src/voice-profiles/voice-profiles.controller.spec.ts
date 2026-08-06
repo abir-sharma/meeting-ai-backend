@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { VoiceProfilesController } from './voice-profiles.controller';
 import { VoiceProfilesService } from './voice-profiles.service';
+import { describe } from 'node:test';
 
 describe('VoiceProfilesController', () => {
   let controller: VoiceProfilesController;
@@ -18,3 +19,8 @@ describe('VoiceProfilesController', () => {
     expect(controller).toBeDefined();
   });
 });
+
+
+
+
+

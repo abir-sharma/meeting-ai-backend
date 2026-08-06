@@ -4,7 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { PwAuthService } from './pw-auth.service';
 import { MobileSignupDto, SignupDto } from './dto/signup-mobile.dto';
 import { User } from 'src/users/entities/user.entity';
-import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Error, Model, Types } from 'mongoose';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { AuthIdentity } from 'src/auth/entities/auth_identities.entity';
 import { LoginDto, MobileLoginDto } from './dto/login-mobile.dto';
@@ -17,8 +17,6 @@ import { EmailOtp } from './entities/email-otp.schema';
 import { Meeting } from 'src/meetings/entities/meeting.entity';
 import { Device } from 'src/devices/entities/device.entity';
 import { VoiceProfile } from 'src/voice-profiles/entities/voice-profile.entity';
-import * as crypto from "crypto"
-import { SetPasswordDto } from './dto/set-email-password.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { LinkProfileDto } from './dto/link-mobile.dto';
 
@@ -41,6 +39,7 @@ export class AuthService {
   ) { }
 
   async signup(dto: SignupDto) {
+    
     if (dto.type === 'email') {
       if (!dto.email || !dto.password) {
         throw new BadRequestException('Email and password are required');
@@ -51,6 +50,7 @@ export class AuthService {
         password: dto.password,
       });
     }
+    
 
     if (dto.type === 'mobile') {
       if (!dto.mobile || !dto.name) {

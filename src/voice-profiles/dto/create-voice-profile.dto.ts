@@ -1,23 +1,35 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+import {
+  IsString,
+  IsArray,
+  IsNumber,
+} from 'class-validator';
+
 export class CreateVoiceProfileDto {
 
   @ApiProperty({
-    example: "Abir Sharma",
-    description: "Name of the speaker"
+    example: 'Abir Sharma',
+    description: 'Name of the speaker',
   })
-  name: string;
+  @IsString()
+  name!: string;
 
   @ApiProperty({
-    example: "64f8a3d2c9e77f4a2a1b1234",
-    description: "User ID associated with this voice"
+    example: '64f8a3d2c9e77f4a2a1b1234',
+    description: 'User ID associated with this voice',
   })
-  userId: string;
+  @IsString()
+  userId!: string;
 
   @ApiProperty({
-    example: [0.12,0.34,0.56,0.78],
-    description: "Voice embedding vector"
+    example: [0.12, 0.34, 0.56],
+    description: 'Voice embedding vector',
+    required: false,
   })
-  voiceEmbedding: number[];
+  @IsArray()
+  @IsNumber({}, { each: true })
+  voiceEmbedding!: number[];
+
 
 }

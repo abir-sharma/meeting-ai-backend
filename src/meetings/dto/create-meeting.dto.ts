@@ -15,20 +15,20 @@ export class CreateMeetingDto {
     description: "Device MongoDB ID",
   })
   @IsMongoId()
-  deviceId: string;
+  deviceId!: string;
 
   @ApiProperty({
     example: "67cf0a23412e912345678901",
     description: "User who created the meeting",
   })
   @IsMongoId()
-  createdBy: string;
+  createdBy!: string;
 
-  @ApiProperty({
-    example: "https://storage.example.com/audio/meeting123.mp3",
-  })
-  @IsString()
-  audioUrl: string;
+  // @ApiProperty({
+  //   example: "https://storage.example.com/audio/meeting123.mp3",
+  // })
+  // @IsString()
+  // audioUrl!: string;
 
   @ApiProperty({
     example: "Discussion about product roadmap and upcoming features.",
@@ -59,7 +59,7 @@ export class CreateMeetingDto {
     example: "2026-03-13T10:00:00Z",
   })
   @IsDateString()
-  startTime: string;
+  startTime!: string;
 
   @ApiProperty({
     example: "2026-03-13T11:00:00Z",

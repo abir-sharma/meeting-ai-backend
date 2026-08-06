@@ -21,6 +21,18 @@ export class MeetingSpeakerSegment {
   })
   speakerId: Types.ObjectId;
 
+  // Display name: a registered speaker's name, or "Speaker A/B" for
+  // unidentified speakers detected by diarization.
+  @Prop({
+    type: String,
+  })
+  speakerName: string;
+
+  @Prop({
+    type: Number,
+  })
+  confidence: number;
+
   @Prop({
     required: true,
   })
